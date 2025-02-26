@@ -89,4 +89,35 @@
         (ok true)
     )
 )
+;; Read-Only Queries & Helper Functions
+(define-read-only (get-character (character-id uint))
+    (map-get? characters character-id)
+)
+
+(define-read-only (get-listing (character-id uint))
+    (map-get? market character-id)
+)
+
+(define-read-only (get-owner-count (user principal))
+    (default-to u0 (map-get? user-character-count user))
+)
+
+(define-read-only (get-owner (character-id uint))
+    (match (map-get? characters character-id)
+        character (ok (get owner character))
+        (err u404)
+    )
+)
+
+(define-private (is-valid-character-id (character-id uint))
+    (<= character-id (var-get last-character-id))
+)
+
+(define-private (is-valid-price (price uint))
+    (>= price MIN_PRICE)
+)
+
+(define-private (is-valid-name (name (string-ascii 24)))
+    (and (> (len name) u0) (<= (len name) u24))
+)
 
