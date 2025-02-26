@@ -51,3 +51,42 @@
         )
     )
 )
+;; Character Battle System
+(define-constant BASE_XP_REQUIRED u100)
+(define-constant MAX_LEVEL u100)
+
+(define-public (battle (attacker-id uint) (defender-id uint))
+    (begin
+        (let ((attacker (unwrap! (map-get? characters attacker-id) (err u404)))
+              (defender (unwrap! (map-get? characters defender-id) (err u404)))
+              (current-block block-height))
+            (asserts! (not (is-eq attacker-id defender-id)) (err u400))
+            (asserts! (is-eq tx-sender (get owner attacker)) (err u401))
+            (asserts! (> current-block (+ (get last-battle-block attacker) u10)) (err u403))
+            
+            (let ((attack-power (+ (get attack attacker) (get level attacker)))
+                  (defense-power (+ (get defense defender) (get level defender)))
+                  (attacker-wins (> attack-power defense-power)))
+                (if attacker-wins
+                    (try! (add-xp attacker-id u50))
+                    (try! (add-xp defender-id u25))
+                )
+                (map-set characters attacker-id (merge attacker { last-battle-block: current-block }))
+                (ok attacker-wins)
+            )
+        )
+    )
+)
+
+(define-private (add-xp (character-id uint) (xp-amount uint))
+    (let ((character (unwrap! (map-get? characters character-id) (err u404)))
+          (new-xp (+ (get xp character) xp-amount))
+          (xp-required (* BASE_XP_REQUIRED (get level character))))
+        (if (and (>= new-xp xp-required) (< (get level character) MAX_LEVEL))
+            (map-set characters character-id (merge character { level: (+ (get level character) u1), xp: u0, attack: (+ (get attack character) u1), defense: (+ (get defense character) u1) }))
+            (map-set characters character-id (merge character { xp: new-xp }))
+        )
+        (ok true)
+    )
+)
+
