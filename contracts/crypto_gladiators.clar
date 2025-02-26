@@ -1,0 +1,21 @@
+;; Core Character Minting System
+(define-constant CONTRACT_OWNER tx-sender)
+(define-constant MINT_PRICE u100000)
+(define-constant MAX_CHARACTERS_PER_USER u100)
+
+(define-data-var last-character-id uint u0)
+(define-map characters uint { owner: principal, name: (string-ascii 24), level: uint, xp: uint, attack: uint, defense: uint, last-battle-block: uint })
+(define-map user-character-count principal uint)
+
+(define-public (mint-character (name (string-ascii 24)))
+    (let ((new-id (+ (var-get last-character-id) u1))
+          (caller tx-sender)
+          (current-count (default-to u0 (map-get? user-character-count caller))))
+        (asserts! (< current-count MAX_CHARACTERS_PER_USER) (err u400))
+        (try! (stx-transfer? MINT_PRICE caller CONTRACT_OWNER))
+        (map-set characters new-id { owner: caller, name: name, level: u1, xp: u0, attack: (+ (mod (len (sha256 block-height)) u10) u1), defense: (+ (mod (len (sha256 (+ block-height u1))) u10) u1), last-battle-block: u0 })
+        (map-set user-character-count caller (+ current-count u1))
+        (var-set last-character-id new-id)
+        (ok new-id)
+    )
+)
