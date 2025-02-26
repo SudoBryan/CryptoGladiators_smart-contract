@@ -1,0 +1,123 @@
+;; Core Character Minting System
+(define-constant CONTRACT_OWNER tx-sender)
+(define-constant MINT_PRICE u100000)
+(define-constant MAX_CHARACTERS_PER_USER u100)
+
+(define-data-var last-character-id uint u0)
+(define-map characters uint { owner: principal, name: (string-ascii 24), level: uint, xp: uint, attack: uint, defense: uint, last-battle-block: uint })
+(define-map user-character-count principal uint)
+
+(define-public (mint-character (name (string-ascii 24)))
+    (let ((new-id (+ (var-get last-character-id) u1))
+          (caller tx-sender)
+          (current-count (default-to u0 (map-get? user-character-count caller))))
+        (asserts! (< current-count MAX_CHARACTERS_PER_USER) (err u400))
+        (try! (stx-transfer? MINT_PRICE caller CONTRACT_OWNER))
+        (map-set characters new-id { owner: caller, name: name, level: u1, xp: u0, attack: (+ (mod (len (sha256 block-height)) u10) u1), defense: (+ (mod (len (sha256 (+ block-height u1))) u10) u1), last-battle-block: u0 })
+        (map-set user-character-count caller (+ current-count u1))
+        (var-set last-character-id new-id)
+        (ok new-id)
+    )
+)
+;; Character Trading System
+(define-constant MIN_PRICE u1000)
+
+(define-map market uint { price: uint, seller: principal })
+
+(define-public (list-for-sale (character-id uint) (price uint))
+    (begin
+        (asserts! (>= price MIN_PRICE) (err u400))
+        (let ((owner (unwrap! (map-get? characters character-id) (err u404))))
+            (asserts! (is-eq tx-sender (get owner owner)) (err u401))
+            (map-set market character-id { price: price, seller: tx-sender })
+            (ok true)
+        )
+    )
+)
+
+(define-public (buy-character (character-id uint))
+    (begin
+        (let ((listing (unwrap! (map-get? market character-id) (err u404)))
+              (buyer-count (default-to u0 (map-get? user-character-count tx-sender))))
+            (asserts! (< buyer-count MAX_CHARACTERS_PER_USER) (err u400))
+            (try! (stx-transfer? (get price listing) tx-sender (get seller listing)))
+            (map-delete market character-id)
+            (let ((character (unwrap! (map-get? characters character-id) (err u404))))
+                (map-set characters character-id (merge character { owner: tx-sender }))
+                (map-set user-character-count (get seller listing) (- (default-to u0 (map-get? user-character-count (get seller listing))) u1))
+                (map-set user-character-count tx-sender (+ buyer-count u1))
+                (ok true)
+            )
+        )
+    )
+)
+;; Character Battle System
+(define-constant BASE_XP_REQUIRED u100)
+(define-constant MAX_LEVEL u100)
+
+(define-public (battle (attacker-id uint) (defender-id uint))
+    (begin
+        (let ((attacker (unwrap! (map-get? characters attacker-id) (err u404)))
+              (defender (unwrap! (map-get? characters defender-id) (err u404)))
+              (current-block block-height))
+            (asserts! (not (is-eq attacker-id defender-id)) (err u400))
+            (asserts! (is-eq tx-sender (get owner attacker)) (err u401))
+            (asserts! (> current-block (+ (get last-battle-block attacker) u10)) (err u403))
+            
+            (let ((attack-power (+ (get attack attacker) (get level attacker)))
+                  (defense-power (+ (get defense defender) (get level defender)))
+                  (attacker-wins (> attack-power defense-power)))
+                (if attacker-wins
+                    (try! (add-xp attacker-id u50))
+                    (try! (add-xp defender-id u25))
+                )
+                (map-set characters attacker-id (merge attacker { last-battle-block: current-block }))
+                (ok attacker-wins)
+            )
+        )
+    )
+)
+
+(define-private (add-xp (character-id uint) (xp-amount uint))
+    (let ((character (unwrap! (map-get? characters character-id) (err u404)))
+          (new-xp (+ (get xp character) xp-amount))
+          (xp-required (* BASE_XP_REQUIRED (get level character))))
+        (if (and (>= new-xp xp-required) (< (get level character) MAX_LEVEL))
+            (map-set characters character-id (merge character { level: (+ (get level character) u1), xp: u0, attack: (+ (get attack character) u1), defense: (+ (get defense character) u1) }))
+            (map-set characters character-id (merge character { xp: new-xp }))
+        )
+        (ok true)
+    )
+)
+;; Read-Only Queries & Helper Functions
+(define-read-only (get-character (character-id uint))
+    (map-get? characters character-id)
+)
+
+(define-read-only (get-listing (character-id uint))
+    (map-get? market character-id)
+)
+
+(define-read-only (get-owner-count (user principal))
+    (default-to u0 (map-get? user-character-count user))
+)
+
+(define-read-only (get-owner (character-id uint))
+    (match (map-get? characters character-id)
+        character (ok (get owner character))
+        (err u404)
+    )
+)
+
+(define-private (is-valid-character-id (character-id uint))
+    (<= character-id (var-get last-character-id))
+)
+
+(define-private (is-valid-price (price uint))
+    (>= price MIN_PRICE)
+)
+
+(define-private (is-valid-name (name (string-ascii 24)))
+    (and (> (len name) u0) (<= (len name) u24))
+)
+
