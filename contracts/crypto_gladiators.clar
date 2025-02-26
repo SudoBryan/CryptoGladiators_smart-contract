@@ -19,3 +19,35 @@
         (ok new-id)
     )
 )
+;; Character Trading System
+(define-constant MIN_PRICE u1000)
+
+(define-map market uint { price: uint, seller: principal })
+
+(define-public (list-for-sale (character-id uint) (price uint))
+    (begin
+        (asserts! (>= price MIN_PRICE) (err u400))
+        (let ((owner (unwrap! (map-get? characters character-id) (err u404))))
+            (asserts! (is-eq tx-sender (get owner owner)) (err u401))
+            (map-set market character-id { price: price, seller: tx-sender })
+            (ok true)
+        )
+    )
+)
+
+(define-public (buy-character (character-id uint))
+    (begin
+        (let ((listing (unwrap! (map-get? market character-id) (err u404)))
+              (buyer-count (default-to u0 (map-get? user-character-count tx-sender))))
+            (asserts! (< buyer-count MAX_CHARACTERS_PER_USER) (err u400))
+            (try! (stx-transfer? (get price listing) tx-sender (get seller listing)))
+            (map-delete market character-id)
+            (let ((character (unwrap! (map-get? characters character-id) (err u404))))
+                (map-set characters character-id (merge character { owner: tx-sender }))
+                (map-set user-character-count (get seller listing) (- (default-to u0 (map-get? user-character-count (get seller listing))) u1))
+                (map-set user-character-count tx-sender (+ buyer-count u1))
+                (ok true)
+            )
+        )
+    )
+)
